@@ -1,0 +1,1157 @@
+<!DOCTYPE html>
+<!--
+  HorseWatch - application web compagnon
+  Version : 1.0.1 (2026-11-21)
+  1.0.1 : recherche de la montre par service OU par nom ("HorseWatch"), texte du mode export (firmware 0.6.0).
+  Fichier unique, sans compilation. Web Bluetooth : Bluefy (iOS), extension Safari WebBLE (iOS 26+),
+  Chrome (PC, Android). Hebergement HTTPS obligatoire (GitHub Pages).
+  Format des traces : firmware src/core/track_logger.h (formats 1 et 2).
+  Protocole d'export : firmware src/core/export_proto.h.
+  La partie "CORE" (entre les marqueurs CORE-BEGIN / CORE-END) est testee sous Node.js (tests/test_app.js).
+-->
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>HorseWatch</title>
+<style>
+:root {
+  --bg: #000; --card: #16161a; --card2: #222228; --text: #fff; --dim: #a0a0a8; --line: #2c2c33;
+  --accent: #ff7a1a; --ok: #2ecc71; --warn: #ffb020; --bad: #ff3b30; --blue: #3d8bff;
+  --z0: #2ecc71; --z1: #f5d10c; --z2: #ff7a1a; --z3: #ff2d2d; --z4: #b0102a;
+  --radius: 18px; --tap: 56px;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+}
+body.sun { --bg: #fff; --card: #f1f1f4; --card2: #e2e2e8; --text: #000; --dim: #333; --line: #c8c8d0; --accent: #c45100; }
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 17px; }
+body.sun { font-weight: 600; }
+header { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: calc(env(safe-area-inset-top) + 18px) 16px 8px;
+         display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--line); }
+header h1 { font-size: 22px; margin: 0; flex: 1; }
+.ver { position: absolute; top: calc(env(safe-area-inset-top) + 2px); right: 10px; font-size: 11px; line-height: 14px; color: var(--dim); }
+.pill { font-size: 13px; padding: 5px 10px; border-radius: 99px; background: var(--card2); color: var(--dim); white-space: nowrap; }
+.pill.on { background: var(--ok); color: #000; }
+main { padding: 14px 14px calc(env(safe-area-inset-bottom) + 96px); max-width: 760px; margin: 0 auto; }
+nav { position: fixed; bottom: 0; left: 0; right: 0; z-index: 6; display: flex; background: var(--bg);
+      border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); }
+nav button { flex: 1; min-height: 66px; background: none; border: 0; color: var(--dim); font: inherit; font-size: 14px; }
+nav button b { display: block; font-size: 22px; line-height: 1.2; }
+nav button.act { color: var(--accent); }
+.card { background: var(--card); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; }
+.card h2 { font-size: 18px; margin: 0 0 10px; }
+.btn { display: block; width: 100%; min-height: var(--tap); border: 0; border-radius: 16px; font: inherit; font-size: 18px;
+       font-weight: 700; background: var(--accent); color: #000; margin: 8px 0; padding: 0 14px; }
+.btn.sec { background: var(--card2); color: var(--text); }
+.btn.bad { background: var(--bad); color: #fff; }
+.btn:disabled { opacity: .4; }
+.row { display: flex; gap: 10px; }
+.row > * { flex: 1; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+.stat { background: var(--card2); border-radius: 14px; padding: 10px 12px; }
+.stat small { display: block; color: var(--dim); font-size: 13px; }
+.stat span { font-size: 24px; font-weight: 700; }
+.muted { color: var(--dim); font-size: 14px; }
+.bar { height: 14px; background: var(--card2); border-radius: 8px; overflow: hidden; margin: 6px 0; }
+.bar > div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+.sess { display: flex; align-items: center; gap: 12px; padding: 14px; background: var(--card); border-radius: var(--radius);
+        margin-bottom: 10px; min-height: 76px; }
+.sess .d { flex: 1; }
+.sess .d b { display: block; font-size: 18px; }
+.sess .hr { font-size: 22px; font-weight: 800; color: var(--accent); }
+canvas { width: 100%; display: block; }
+#map { height: 320px; border-radius: 14px; overflow: hidden; background: var(--card2); }
+.zones { display: flex; height: 26px; border-radius: 8px; overflow: hidden; margin: 8px 0; }
+.zones div { height: 100%; }
+.zleg { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 10px; font-size: 15px; }
+.dot { width: 14px; height: 14px; border-radius: 4px; display: inline-block; vertical-align: middle; }
+table { width: 100%; border-collapse: collapse; font-size: 15px; }
+td, th { padding: 8px 4px; border-bottom: 1px solid var(--line); text-align: right; }
+td:first-child, th:first-child { text-align: left; }
+.log { font: 13px ui-monospace, Menlo, monospace; color: var(--dim); max-height: 160px; overflow: auto; white-space: pre-wrap; }
+label.sw { display: flex; align-items: center; justify-content: space-between; min-height: var(--tap); gap: 12px; }
+label.sw input { width: 52px; height: 30px; }
+.seg { display: flex; background: var(--card2); border-radius: 14px; padding: 4px; margin: 6px 0; }
+.seg button { flex: 1; min-height: 46px; border: 0; border-radius: 11px; background: none; color: var(--text); font: inherit; font-weight: 700; }
+.seg button.act { background: var(--accent); color: #000; }
+input[type=number] { width: 90px; min-height: 48px; font: inherit; font-size: 20px; border-radius: 12px; border: 1px solid var(--line);
+                     background: var(--card2); color: var(--text); text-align: center; }
+.hide { display: none !important; }
+#detail { position: fixed; inset: 0; z-index: 10; background: var(--bg); overflow: auto; }
+#detail header { position: sticky; }
+.back { min-height: 48px; min-width: 64px; font-size: 24px; background: var(--card2); color: var(--text); border: 0; border-radius: 14px; }
+.warn { background: #3a2a00; color: #ffd27a; border-radius: 12px; padding: 12px; font-size: 15px; }
+body.sun .warn { background: #fff1cc; color: #5a3d00; }
+</style>
+</head>
+<body>
+<header>
+  <h1>HorseWatch</h1>
+  <span id="conn" class="pill">Déconnectée</span>
+  <span id="ver" class="ver"></span>
+</header>
+
+<main>
+  <!-- ================= MONTRE ================= -->
+  <section id="tab-watch">
+    <div id="nobt" class="warn hide">
+      Ce navigateur ne gère pas le Bluetooth web. Sur iPhone, ouvrez cette page dans <b>Bluefy</b> (gratuit, App Store)
+      ou avec l'extension Safari <b>WebBLE</b> (iOS 26 et plus). Sur PC ou Android : Chrome.
+      Le mode démo fonctionne partout.
+    </div>
+    <div class="card">
+      <h2>Montre</h2>
+      <p class="muted">Sur la montre : glisser vers la droite, Paramètres &gt; Traces &gt; « Mode export ». La montre affiche « Visible ».</p>
+      <button class="btn" id="b-connect">Connecter la montre</button>
+      <button class="btn sec" id="b-demo">Mode démo (fausse montre)</button>
+      <div id="winfo" class="grid hide"></div>
+    </div>
+    <div class="card hide" id="sync-card">
+      <h2>Synchronisation</h2>
+      <label class="sw">Supprimer de la montre après vérification <input type="checkbox" id="c-del"></label>
+      <button class="btn" id="b-sync">Télécharger les nouvelles séances</button>
+      <div id="sync-st" class="muted"></div>
+      <div class="bar"><div id="p-file"></div></div>
+      <div class="bar"><div id="p-all" style="background:var(--ok)"></div></div>
+      <button class="btn sec hide" id="b-cancel">Annuler</button>
+      <div id="watch-list"></div>
+    </div>
+    <div class="card"><h2>Journal</h2><div id="log" class="log"></div></div>
+  </section>
+
+  <!-- ================= SEANCES ================= -->
+  <section id="tab-sess" class="hide">
+    <div id="sess-list"></div>
+    <p id="sess-empty" class="muted">Aucune séance. Synchronisez la montre ou essayez le mode démo.</p>
+  </section>
+
+  <!-- ================= ANALYSES ================= -->
+  <section id="tab-ana" class="hide">
+    <div class="card">
+      <h2>Évolution</h2>
+      <p class="muted">V140 / V200 : vitesse (m/min) à 140 et 200 bpm, par régression FC-vitesse sur les phases stabilisées.
+        Récupération : FC 1, 2 et 5 min après la fin de l'effort, et constante de temps de la décroissance.</p>
+      <div class="seg" id="ana-seg"><button data-k="v" class="act">V140 / V200</button><button data-k="r">Récupération</button></div>
+      <canvas id="ana-chart" height="220"></canvas>
+      <div id="ana-table"></div>
+    </div>
+    <p class="muted">Plus tard : variabilité cardiaque (intervalles RR) et détection d'allure (IMU).</p>
+  </section>
+
+  <!-- ================= REGLAGES ================= -->
+  <section id="tab-set" class="hide">
+    <div class="card">
+      <h2>Affichage</h2>
+      <label class="sw">Mode plein soleil (fond clair, fort contraste) <input type="checkbox" id="c-sun"></label>
+    </div>
+    <div class="card">
+      <h2>Zones cardiaques</h2>
+      <p class="muted">Reprises de la montre à chaque connexion. Bornes hautes vert / jaune / orange / rouge.</p>
+      <div class="row" id="zin"></div>
+      <button class="btn sec" id="b-zsave">Enregistrer les zones</button>
+    </div>
+    <div class="card">
+      <h2>Sauvegarde</h2>
+      <p class="muted">Les séances sont stockées dans ce navigateur : elles disparaissent si l'appli est désinstallée.
+        Exportez régulièrement une sauvegarde vers Fichiers / iCloud.</p>
+      <button class="btn" id="b-backup">Exporter une sauvegarde complète</button>
+      <button class="btn sec" id="b-restore">Restaurer une sauvegarde</button>
+      <input type="file" id="f-restore" accept=".json,application/json" class="hide">
+      <button class="btn bad" id="b-wipe">Effacer toutes les séances locales</button>
+    </div>
+    <div class="card muted" id="about"></div>
+  </section>
+</main>
+
+<nav>
+  <button data-tab="watch" class="act"><b>⌚</b>Montre</button>
+  <button data-tab="sess"><b>☰</b>Séances</button>
+  <button data-tab="ana"><b>↗</b>Analyses</button>
+  <button data-tab="set"><b>⚙</b>Réglages</button>
+</nav>
+
+<!-- ================= DETAIL D'UNE SEANCE ================= -->
+<div id="detail" class="hide">
+  <header><button class="back" id="d-back">‹</button><h1 id="d-title" style="font-size:19px">Séance</h1><span class="ver" id="ver2"></span></header>
+  <main>
+    <div class="grid" id="d-stats"></div>
+    <div class="card"><h2>Fréquence cardiaque</h2><canvas id="c-hr" height="200"></canvas></div>
+    <div class="card"><h2>Vitesse (m/min)</h2><canvas id="c-v" height="200"></canvas></div>
+    <div class="card">
+      <h2>Tracé</h2>
+      <div class="seg" id="map-seg"><button data-k="hr" class="act">Couleur FC</button><button data-k="v">Couleur vitesse</button></div>
+      <div id="map"></div>
+      <p class="muted" id="map-note"></p>
+    </div>
+    <div class="card"><h2>Temps par zone</h2><div class="zones" id="d-zbar"></div><div class="zleg" id="d-zleg"></div></div>
+    <div class="card"><h2>Analyses</h2><div id="d-ana"></div></div>
+    <div class="card">
+      <h2>Exporter</h2>
+      <div class="row"><button class="btn" id="d-csv">CSV</button><button class="btn" id="d-gpx">GPX</button></div>
+      <button class="btn sec" id="d-raw">Fichier brut .hwt</button>
+      <button class="btn bad" id="d-del">Supprimer cette séance (téléphone)</button>
+    </div>
+  </main>
+</div>
+
+<script>
+/*CORE-BEGIN*/
+"use strict";
+const HW = {};
+HW.VERSION = "1.0.1";
+HW.UUID = {
+  svc:  "48570001-6f72-7365-5761-746368000000",
+  info: "48570002-6f72-7365-5761-746368000000",
+  ctrl: "48570003-6f72-7365-5761-746368000000",
+  data: "48570004-6f72-7365-5761-746368000000",
+};
+HW.TRACK_MAGIC = 0x4B545748;          /* "HWTK" */
+HW.HDR_SIZE = 32;
+HW.REC_SIZE = 24;
+HW.FORMATS = [1, 2];                  /* versions du format .hwt gerees */
+HW.DEFAULT_ZONES = [100, 140, 170, 200];
+HW.ZONE_COLORS = ["#2ecc71", "#f5d10c", "#ff7a1a", "#ff2d2d", "#b0102a"];
+HW.ZONE_NAMES = ["Vert", "Jaune", "Orange", "Rouge", "Au-delà (alarme)"];
+
+/* ---------------------------------------------------------------- CRC-32 IEEE (identique a export_proto.c) */
+HW._crcTab = null;
+HW.crc32 = function (u8, crc = 0) {
+  if (!HW._crcTab) {
+    HW._crcTab = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) { let c = i; for (let k = 0; k < 8; k++) c = (c & 1) ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; HW._crcTab[i] = c >>> 0; }
+  }
+  crc = ~crc >>> 0;
+  for (let i = 0; i < u8.length; i++) crc = HW._crcTab[(crc ^ u8[i]) & 0xFF] ^ (crc >>> 8);
+  return (~crc) >>> 0;
+};
+
+/* ---------------------------------------------------------------- geodesie */
+HW.haversine = function (la1, lo1, la2, lo2) {
+  const R = 6371008.8, k = Math.PI / 180;
+  const dla = (la2 - la1) * k, dlo = (lo2 - lo1) * k;
+  const a = Math.sin(dla / 2) ** 2 + Math.cos(la1 * k) * Math.cos(la2 * k) * Math.sin(dlo / 2) ** 2;
+  return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+/* ---------------------------------------------------------------- decodeur .hwt (calque sur track_logger.h) */
+HW.decodeHwt = function (input) {
+  const u8 = input instanceof Uint8Array ? input : new Uint8Array(input);
+  if (u8.length < HW.HDR_SIZE) throw new Error("fichier trop court");
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  const magic = dv.getUint32(0, true);
+  if (magic !== HW.TRACK_MAGIC) throw new Error("ce n'est pas une trace HorseWatch");
+  const fmt = dv.getUint16(4, true);
+  let recSize = dv.getUint16(6, true);
+  const warnings = [];
+  if (!HW.FORMATS.includes(fmt)) warnings.push("format " + fmt + " plus recent que l'appli : lecture des champs connus seulement");
+  if (recSize < HW.REC_SIZE) throw new Error("taille d'enregistrement invalide : " + recSize);
+  const header = {
+    magic, fmt, recSize,
+    start: dv.getUint32(8, true),
+    periodMs: dv.getUint16(12, true) || 1000,
+    fw: u8[14] + "." + u8[15] + "." + u8[16],
+    summaryValid: false, durationS: 0, distM: 0, hrMax: 0, hrAvg: 0,
+  };
+  if (fmt >= 2) {
+    header.summaryValid = (u8[17] & 1) === 1;
+    header.durationS = dv.getUint32(18, true);
+    header.distM = dv.getUint32(22, true);
+    header.hrMax = u8[26];
+    header.hrAvg = u8[27];
+  }
+  const n = Math.floor((u8.length - HW.HDR_SIZE) / recSize);
+  if ((u8.length - HW.HDR_SIZE) % recSize) warnings.push("dernier enregistrement incomplet ignoré");
+  const t = new Float64Array(n), lat = new Float64Array(n), lon = new Float64Array(n), alt = new Float32Array(n);
+  const v = new Float32Array(n), hr = new Float32Array(n), rr = new Uint16Array(n);
+  const sats = new Uint8Array(n), hdop = new Float32Array(n), flags = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    const o = HW.HDR_SIZE + i * recSize;
+    t[i] = dv.getUint32(o, true) / 1000;
+    const f = u8[o + 19];
+    flags[i] = f;
+    const fix = (f & 1) !== 0;
+    lat[i] = fix ? dv.getInt32(o + 4, true) / 1e7 : NaN;
+    lon[i] = fix ? dv.getInt32(o + 8, true) / 1e7 : NaN;
+    alt[i] = fix ? dv.getInt16(o + 12, true) / 10 : NaN;
+    v[i] = fix ? dv.getUint16(o + 14, true) * 60 / 100 : NaN;      /* cm/s -> m/min */
+    hr[i] = (f & 2) && u8[o + 16] > 0 ? u8[o + 16] : NaN;
+    sats[i] = u8[o + 17];
+    hdop[i] = u8[o + 18] / 10;
+    rr[i] = dv.getUint16(o + 20, true);
+  }
+  return { header, n, t, lat, lon, alt, v, hr, rr, sats, hdop, flags, warnings };
+};
+
+/* Resume, memes regles que track_summary.c (distance si vitesse >= 0,4 m/s et HDOP < 5) */
+HW.summarize = function (d) {
+  let dist = 0, hrMax = 0, hrSum = 0, hrN = 0, lastLat = NaN, lastLon = NaN;
+  for (let i = 0; i < d.n; i++) {
+    if (!isNaN(d.hr[i])) { hrN++; hrSum += d.hr[i]; if (d.hr[i] > hrMax) hrMax = d.hr[i]; }
+    if (!isNaN(d.lat[i])) {
+      const ok = Math.round(d.v[i] * 100 / 60) >= 40 && Math.round(d.hdop[i] * 10) < 50;
+      if (!isNaN(lastLat) && ok) dist += HW.haversine(lastLat, lastLon, d.lat[i], d.lon[i]);
+      lastLat = d.lat[i]; lastLon = d.lon[i];
+    }
+  }
+  return { durationS: d.n ? Math.floor(d.t[d.n - 1]) : 0, distM: Math.round(dist), hrMax, hrAvg: hrN ? Math.round(hrSum / hrN) : 0 };
+};
+
+/* ---------------------------------------------------------------- generateur .hwt (demo, meme format que le firmware) */
+HW.encodeHwt = function (recs, opt = {}) {
+  const fmt = opt.fmt || 2, n = recs.length;
+  const u8 = new Uint8Array(HW.HDR_SIZE + n * HW.REC_SIZE);
+  const dv = new DataView(u8.buffer);
+  dv.setUint32(0, HW.TRACK_MAGIC, true);
+  dv.setUint16(4, fmt, true);
+  dv.setUint16(6, HW.REC_SIZE, true);
+  dv.setUint32(8, opt.start || 0, true);
+  dv.setUint16(12, opt.periodMs || 1000, true);
+  u8[14] = 0; u8[15] = 6; u8[16] = 0;
+  recs.forEach((r, i) => {
+    const o = HW.HDR_SIZE + i * HW.REC_SIZE;
+    let f = 8;
+    dv.setUint32(o, Math.round(r.t * 1000), true);
+    if (r.lat !== undefined && !isNaN(r.lat)) {
+      dv.setInt32(o + 4, Math.round(r.lat * 1e7), true);
+      dv.setInt32(o + 8, Math.round(r.lon * 1e7), true);
+      dv.setInt16(o + 12, Math.round((r.alt || 0) * 10), true);
+      dv.setUint16(o + 14, Math.round(r.v * 100 / 60), true);
+      u8[o + 17] = r.sats || 12; u8[o + 18] = Math.round((r.hdop || 0.9) * 10);
+      f |= 1;
+    }
+    if (r.hr > 0) { u8[o + 16] = Math.round(r.hr); f |= 2; dv.setUint16(o + 20, Math.round(60000 / r.hr), true); }
+    u8[o + 19] = f;
+  });
+  if (fmt >= 2 && opt.summary !== false) {
+    const s = HW.summarize(HW.decodeHwt(u8));
+    u8[17] = 1;
+    dv.setUint32(18, s.durationS, true);
+    dv.setUint32(22, s.distM, true);
+    u8[26] = s.hrMax; u8[27] = s.hrAvg;
+  }
+  return u8;
+};
+
+/* Seance de demo realiste : echauffement au pas, trot, galops fractionnes, recuperation */
+HW.genDemoSession = function (start, seed = 1, fitness = 1) {
+  let s = seed >>> 0;
+  const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+  const plan = [[300, 100], [240, 220], [120, 110], [180, 330], [90, 120], [150, 470], [120, 110], [120, 540], [360, 70]];
+  const recs = [];
+  let t = 0, lat = 43.59 + rnd() * 0.01, lon = 1.53 + rnd() * 0.01, hdg = rnd() * 6.28, hr = 70, vS = 0;
+  const hrOf = v => 52 + v * 0.27 / fitness;          /* FC d'equilibre pour une vitesse (m/min) */
+  for (const [dur, vt] of plan) {
+    for (let i = 0; i < dur; i++, t++) {
+      vS += (vt - vS) * 0.08;
+      const v = Math.max(0, vS + (rnd() - 0.5) * vt * 0.05);
+      hdg += (rnd() - 0.5) * 0.08;
+      const dm = v / 60;
+      lat += dm * Math.cos(hdg) / 111195; lon += dm * Math.sin(hdg) / (111195 * Math.cos(lat * Math.PI / 180));
+      const target = hrOf(v);
+      hr += (target - hr) * (target > hr ? 1 / 25 : 1 / 55);   /* montee ~25 s, descente ~55 s */
+      const gpsGap = t > 400 && t < 420;          /* courte perte GPS pendant le trot */
+      recs.push({ t, lat: gpsGap ? NaN : lat, lon: gpsGap ? NaN : lon, alt: 150 + 5 * Math.sin(t / 200), v: gpsGap ? NaN : v,
+                  hr: hr + (rnd() - 0.5) * 2, sats: 13, hdop: 0.8 });
+    }
+  }
+  return HW.encodeHwt(recs, { start, fmt: 2 });
+};
+
+/* ---------------------------------------------------------------- zones */
+HW.zoneOf = function (bpm, z) {
+  if (!(bpm > 0)) return -1;
+  for (let i = 0; i < 4; i++) if (bpm <= z[i]) return i;
+  return 4;
+};
+HW.zoneTimes = function (d, zones) {
+  const out = [0, 0, 0, 0, 0], per = d.header.periodMs / 1000;
+  for (let i = 0; i < d.n; i++) { const z = HW.zoneOf(d.hr[i], zones); if (z >= 0) out[z] += per; }
+  return out;
+};
+
+/* ---------------------------------------------------------------- V140 / V200 */
+/* Phases stabilisees : fenetres de 30 s (pas 10 s), vitesse >= 60 m/min et coefficient de variation < 8 %,
+ * FC sans trou, amplitude <= 6 bpm et tendance < 0,03 bpm/s. Regression lineaire FC = a + b.V, inversee. */
+HW.stablePoints = function (d, opt = {}) {
+  const W = opt.win || 30, step = opt.step || 10, per = d.header.periodMs / 1000;
+  const w = Math.max(3, Math.round(W / per)), st = Math.max(1, Math.round(step / per));
+  const pts = [];
+  for (let i0 = 0; i0 + w <= d.n; i0 += st) {
+    let sv = 0, sv2 = 0, sh = 0, hmin = 1e9, hmax = -1e9, ok = true, st1 = 0, sth = 0, stt = 0, sth2 = 0;
+    for (let i = i0; i < i0 + w; i++) {
+      const v = d.v[i], h = d.hr[i];
+      if (isNaN(v) || isNaN(h)) { ok = false; break; }
+      sv += v; sv2 += v * v; sh += h; hmin = Math.min(hmin, h); hmax = Math.max(hmax, h);
+      const tt = d.t[i] - d.t[i0]; st1 += tt; stt += tt * tt; sth += tt * h; sth2++;
+    }
+    if (!ok) continue;
+    const mv = sv / w, sd = Math.sqrt(Math.max(0, sv2 / w - mv * mv)), mh = sh / w;
+    const slope = (sth2 * sth - st1 * sh) / (sth2 * stt - st1 * st1);
+    if (mv < 60 || sd / mv > 0.08 || hmax - hmin > 6 || Math.abs(slope) > 0.03) continue;
+    pts.push({ v: mv, hr: mh, t: d.t[i0] });
+  }
+  return pts;
+};
+HW.linreg = function (xs, ys) {
+  const n = xs.length;
+  let sx = 0, sy = 0, sxx = 0, sxy = 0, syy = 0;
+  for (let i = 0; i < n; i++) { sx += xs[i]; sy += ys[i]; sxx += xs[i] * xs[i]; sxy += xs[i] * ys[i]; syy += ys[i] * ys[i]; }
+  const b = (n * sxy - sx * sy) / (n * sxx - sx * sx), a = (sy - b * sx) / n;
+  const ssTot = syy - sy * sy / n;
+  let ssRes = 0;
+  for (let i = 0; i < n; i++) ssRes += (ys[i] - a - b * xs[i]) ** 2;
+  return { a, b, r2: ssTot > 0 ? 1 - ssRes / ssTot : 0 };
+};
+HW.speedAtHr = function (d) {
+  const pts = HW.stablePoints(d);
+  const res = { ok: false, n: pts.length, points: pts, v140: NaN, v200: NaN, a: NaN, b: NaN, r2: NaN, why: "" };
+  if (pts.length < 3) { res.why = "pas assez de phases stabilisées"; return res; }
+  const vs = pts.map(p => p.v), hs = pts.map(p => p.hr);
+  if (Math.max(...vs) - Math.min(...vs) < 80) { res.why = "vitesses trop proches (écart < 80 m/min)"; return res; }
+  const r = HW.linreg(vs, hs);
+  if (!(r.b > 0)) { res.why = "pente FC-vitesse non positive"; return res; }
+  Object.assign(res, { ok: true, a: r.a, b: r.b, r2: r.r2, v140: (140 - r.a) / r.b, v200: (200 - r.a) / r.b });
+  return res;
+};
+
+/* ---------------------------------------------------------------- recuperation */
+/* Fin d'effort : dernier instant ou la vitesse (lissee 10 s) depasse 60 % de la vitesse max, suivi d'au
+ * moins 120 s sous 40 %. FC a +60/+120/+300 s (moyenne sur 5 s). Constante de temps : ajustement de
+ * FC(t) = FCrepos + (FC0 - FCrepos).exp(-t/tau) sur 0..300 s (recherche de FCrepos, tau par moindres carres). */
+HW.smooth = function (arr, halfWin) {
+  const n = arr.length, out = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    let s = 0, c = 0;
+    for (let j = Math.max(0, i - halfWin); j <= Math.min(n - 1, i + halfWin); j++) if (!isNaN(arr[j])) { s += arr[j]; c++; }
+    out[i] = c ? s / c : NaN;
+  }
+  return out;
+};
+HW.hrAt = function (d, t, half = 2) {
+  let s = 0, c = 0;
+  for (let i = 0; i < d.n; i++) if (Math.abs(d.t[i] - t) <= half && !isNaN(d.hr[i])) { s += d.hr[i]; c++; }
+  return c ? s / c : NaN;
+};
+HW.recovery = function (d) {
+  const res = { ok: false, why: "" };
+  if (d.n < 60) { res.why = "séance trop courte"; return res; }
+  const per = d.header.periodMs / 1000;
+  const vs = HW.smooth(d.v, Math.round(5 / per));
+  let vmax = 0;
+  for (let i = 0; i < d.n; i++) if (vs[i] > vmax) vmax = vs[i];
+  if (vmax < 150) { res.why = "pas d'effort marqué"; return res; }
+  const hi = 0.6 * vmax, lo = 0.4 * vmax, need = Math.round(120 / per);
+  const maxDrop = Math.round(30 / per);   /* passage de 60 % a 40 % de vmax en moins de 30 s */
+  let iEnd = -1;
+  for (let i = 0; i < d.n; i++) {
+    if (!(vs[i] >= hi)) continue;
+    let k = i + 1;
+    while (k < d.n && k - i <= maxDrop && !(vs[k] < lo)) k++;
+    if (k - i > maxDrop || k + need > d.n) continue;
+    let calm = true;
+    for (let j = k; j < k + need; j++) if (vs[j] >= lo) { calm = false; break; }   /* trou GPS toléré */
+    if (calm) iEnd = i;
+  }
+  if (iEnd < 0) { res.why = "pas de phase de récupération d'au moins 2 min"; return res; }
+  while (iEnd + 1 < d.n && d.v[iEnd + 1] >= hi) iEnd++;   /* fin exacte sur la vitesse brute */
+  const t0 = d.t[iEnd];
+  const hr0 = HW.hrAt(d, t0, 0) || HW.hrAt(d, t0, 2);
+  Object.assign(res, { ok: true, tEnd: t0, hr0, hr60: HW.hrAt(d, t0 + 60), hr120: HW.hrAt(d, t0 + 120), hr300: HW.hrAt(d, t0 + 300) });
+  /* ajustement exponentiel */
+  const ts = [], hs = [];
+  for (let i = iEnd; i < d.n && d.t[i] - t0 <= 300; i++) if (!isNaN(d.hr[i])) { ts.push(d.t[i] - t0); hs.push(d.hr[i]); }
+  if (ts.length < 30) { res.tau = NaN; return res; }
+  const hmin = Math.min(...hs);
+  let best = { sse: Infinity };
+  for (let rest = Math.max(20, hmin - 60); rest < hmin - 0.25; rest += 0.25) {
+    const xs = [], ys = [];
+    for (let i = 0; i < ts.length; i++) if (hs[i] - rest > 0.5) { xs.push(ts[i]); ys.push(Math.log(hs[i] - rest)); }
+    if (xs.length < 10) continue;
+    const r = HW.linreg(xs, ys);
+    if (!(r.b < 0)) continue;
+    const tau = -1 / r.b, A = Math.exp(r.a);
+    let sse = 0;
+    for (let i = 0; i < ts.length; i++) sse += (hs[i] - rest - A * Math.exp(-ts[i] / tau)) ** 2;
+    if (sse < best.sse) best = { sse, tau, rest };
+  }
+  res.tau = best.tau; res.hrRest = best.rest;
+  return res;
+};
+
+/* ---------------------------------------------------------------- analyse complete d'une seance */
+HW.analyze = function (u8, zones) {
+  const d = HW.decodeHwt(u8);
+  const sum = d.header.summaryValid ? { durationS: d.header.durationS, distM: d.header.distM, hrMax: d.header.hrMax, hrAvg: d.header.hrAvg } : HW.summarize(d);
+  let vmax = 0;
+  const vs = HW.smooth(d.v, 2);
+  for (let i = 0; i < d.n; i++) if (vs[i] > vmax) vmax = vs[i];
+  return { d, sum, vmax, zones: HW.zoneTimes(d, zones), vhr: HW.speedAtHr(d), rec: HW.recovery(d) };
+};
+
+/* ---------------------------------------------------------------- exports */
+HW.iso = e => new Date(e * 1000).toISOString().replace(".000", "");
+HW.toCSV = function (d) {
+  const st = d.header.start;
+  const lines = ["t_s;date_utc;lat;lon;alt_m;vitesse_m_min;fc_bpm;rr_ms;satellites;hdop;flags"];
+  const f = (x, k) => isNaN(x) ? "" : x.toFixed(k).replace(".", ",");
+  for (let i = 0; i < d.n; i++) {
+    lines.push([f(d.t[i], 1), st ? HW.iso(st + Math.floor(d.t[i])) : "", f(d.lat[i], 7), f(d.lon[i], 7), f(d.alt[i], 1),
+      f(d.v[i], 1), isNaN(d.hr[i]) ? "" : d.hr[i], d.rr[i] || "", d.sats[i], f(d.hdop[i], 1), d.flags[i]].join(";"));
+  }
+  return "﻿" + lines.join("\r\n") + "\r\n";
+};
+HW.toGPX = function (d, name) {
+  const st = d.header.start || Math.floor(Date.now() / 1000);
+  const esc = s => String(s).replace(/[<&>"]/g, c => ({ "<": "&lt;", "&": "&amp;", ">": "&gt;", '"': "&quot;" }[c]));
+  const out = ['<?xml version="1.0" encoding="UTF-8"?>',
+    '<gpx version="1.1" creator="HorseWatch ' + HW.VERSION + '" xmlns="http://www.topografix.com/GPX/1/1"',
+    ' xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v1">',
+    "<trk><name>" + esc(name) + "</name><trkseg>"];
+  for (let i = 0; i < d.n; i++) {
+    if (isNaN(d.lat[i])) continue;
+    let ext = "";
+    if (!isNaN(d.hr[i])) ext = "<extensions><gpxtpx:TrackPointExtension><gpxtpx:hr>" + d.hr[i] + "</gpxtpx:hr>" +
+      "<gpxtpx:speed>" + (d.v[i] / 60).toFixed(2) + "</gpxtpx:speed></gpxtpx:TrackPointExtension></extensions>";
+    out.push('<trkpt lat="' + d.lat[i].toFixed(7) + '" lon="' + d.lon[i].toFixed(7) + '"><ele>' + d.alt[i].toFixed(1) +
+      "</ele><time>" + HW.iso(st + Math.floor(d.t[i])) + "</time>" + ext + "</trkpt>");
+  }
+  out.push("</trkseg></trk></gpx>");
+  return out.join("\n");
+};
+HW.b64 = {
+  enc(u8) { let s = ""; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); },
+  dec(b) { const s = atob(b), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; },
+};
+
+/* ---------------------------------------------------------------- protocole d'export (client) */
+HW.PKT = { LIST_ITEM: 0x10, LIST_END: 0x11, CHUNK: 0x20, FILE_END: 0x21, DELETED: 0x30, ERROR: 0x7F };
+HW.ERR = { 1: "enregistrement en cours sur la montre", 2: "trace introuvable", 3: "commande invalide", 4: "erreur de lecture flash" };
+HW.cmd = {
+  list: () => new Uint8Array([0x01]),
+  read: (id, off) => { const b = new Uint8Array(7), v = new DataView(b.buffer); b[0] = 0x02; v.setUint16(1, id, true); v.setUint32(3, off, true); return b; },
+  del: id => { const b = new Uint8Array(3); b[0] = 0x03; new DataView(b.buffer).setUint16(1, id, true); return b; },
+  cancel: () => new Uint8Array([0x04]),
+};
+HW.parsePacket = function (u8) {
+  const v = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  const p = { type: u8[0], seq: v.getUint16(1, true) };
+  switch (p.type) {
+    case HW.PKT.LIST_ITEM:
+      Object.assign(p, { id: v.getUint16(3, true), start: v.getUint32(5, true), durationS: v.getUint32(9, true), size: v.getUint32(13, true),
+        distM: v.getUint32(17, true), hrMax: u8[21], hrAvg: u8[22], fmt: u8[23], summaryValid: (u8[24] & 1) === 1 });
+      break;
+    case HW.PKT.LIST_END: p.count = v.getUint16(3, true); break;
+    case HW.PKT.CHUNK: p.id = v.getUint16(3, true); p.offset = v.getUint32(5, true); p.data = u8.subarray(9); break;
+    case HW.PKT.FILE_END: p.id = v.getUint16(3, true); p.size = v.getUint32(5, true); p.crc = v.getUint32(9, true); break;
+    case HW.PKT.DELETED: p.id = v.getUint16(3, true); p.ok = u8[5] === 1; break;
+    case HW.PKT.ERROR: p.code = u8[3]; p.id = v.getUint16(4, true); break;
+  }
+  return p;
+};
+
+/* transport = { write(Uint8Array) -> Promise, onNotify(fn) } */
+HW.WatchClient = class {
+  constructor(transport, opt = {}) {
+    this.tr = transport;
+    this.timeoutMs = opt.timeoutMs || 5000;
+    this.handler = null;
+    this.stats = { resumes: 0, packets: 0, seqGaps: 0 };
+    this.lastSeq = null;
+    transport.onNotify(u8 => {
+      const p = HW.parsePacket(u8);
+      this.stats.packets++;
+      if (this.lastSeq !== null && p.seq !== ((this.lastSeq + 1) & 0xFFFF)) this.stats.seqGaps++;
+      this.lastSeq = p.seq;
+      if (this.handler) this.handler(p);
+    });
+  }
+  _wait(onPacket, startFn) {
+    return new Promise((resolve, reject) => {
+      let timer = null;
+      const arm = () => { clearTimeout(timer); timer = setTimeout(() => ctx.onTimeout(), this.timeoutMs); };
+      const ctx = {
+        done: v => { clearTimeout(timer); this.handler = null; resolve(v); },
+        fail: e => { clearTimeout(timer); this.handler = null; reject(e instanceof Error ? e : new Error(e)); },
+        onTimeout: () => ctx.fail(new Error("pas de réponse de la montre")),
+        arm,
+      };
+      this.handler = p => { arm(); if (p.type === HW.PKT.ERROR) return ctx.fail(new Error(HW.ERR[p.code] || ("erreur " + p.code))); onPacket(p, ctx); };
+      arm();
+      Promise.resolve(startFn(ctx)).catch(ctx.fail);
+    });
+  }
+  list() {
+    const items = [];
+    return this._wait((p, ctx) => {
+      if (p.type === HW.PKT.LIST_ITEM) items.push(p);
+      else if (p.type === HW.PKT.LIST_END) ctx.done(items);
+    }, () => this.tr.write(HW.cmd.list()));
+  }
+  /* Telecharge une trace complete ; reprise automatique depuis le dernier octet recu (trou, silence) ; CRC verifie. */
+  read(entry, onProgress, cancelToken) {
+    const buf = new Uint8Array(entry.size);
+    /* resuming : une reprise est demandee, on ignore les paquets hors sequence jusqu'au 1er paquet a l'offset attendu.
+     * skipEnds : nombre de FILE_END d'anciens flux encore en route (a ignorer). */
+    let got = 0, resuming = false, retries = 0, skipEnds = 0;
+    const id = entry.id;
+    const resume = (ctx, oldStreamInFlight) => {
+      if (++retries > 8) return ctx.fail(new Error("transfert interrompu (trop de reprises)"));
+      this.stats.resumes++;
+      resuming = true;
+      skipEnds = oldStreamInFlight ? 1 : 0;
+      ctx.arm();
+      this.tr.write(HW.cmd.read(id, got)).catch(ctx.fail);
+    };
+    return this._wait((p, ctx) => {
+      if (cancelToken && cancelToken.cancelled) { this.tr.write(HW.cmd.cancel()).catch(() => {}); return ctx.fail(new Error("annulé")); }
+      if (p.type === HW.PKT.CHUNK && p.id === id) {
+        if (p.offset === got) {
+          resuming = false;
+          if (got + p.data.length > buf.length) return ctx.fail(new Error("données au-delà de la taille annoncée"));
+          buf.set(p.data, got);
+          got += p.data.length;
+          if (onProgress) onProgress(got, entry.size);
+        } else if (p.offset > got && !resuming) {
+          resume(ctx, true);                 /* paquet perdu : reprise depuis le dernier octet contigu */
+        }                                    /* sinon : doublon ou reste de l'ancien flux, ignore */
+      } else if (p.type === HW.PKT.FILE_END && p.id === id) {
+        if (skipEnds > 0) { skipEnds--; return; }   /* fin de l'ancien flux : le nouveau arrive */
+        if (got < p.size) return resume(ctx, false);
+        const crc = HW.crc32(buf);
+        if (crc !== p.crc) return ctx.fail(new Error("CRC incorrect (" + crc.toString(16) + " au lieu de " + p.crc.toString(16) + ")"));
+        ctx.done(buf);
+      }
+    }, ctx => { ctx.onTimeout = () => (got > 0 || retries === 0) ? resume(ctx, false) : ctx.fail(new Error("pas de réponse de la montre"));
+                return this.tr.write(HW.cmd.read(id, 0)); });
+  }
+  remove(id) {
+    return this._wait((p, ctx) => { if (p.type === HW.PKT.DELETED && p.id === id) ctx.done(p.ok); }, () => this.tr.write(HW.cmd.del(id)));
+  }
+};
+
+/* ---------------------------------------------------------------- fausse montre (portage JS de export_proto.c) */
+HW.FakeWatch = class {
+  constructor(files, opt = {}) {
+    this.files = files;                    /* Map id -> Uint8Array */
+    this.mtu = opt.mtu || 185;
+    this.batch = opt.batch || 4;           /* paquets par tranche */
+    this.delay = opt.delay || 20;          /* ms entre tranches (~35 ko/s, ordre de grandeur Bluefy) */
+    this.busy = !!opt.busy;
+    this.seq = 0;
+    this.cb = null;
+    this.queue = [];
+    this.timer = null;
+    this.gen = 0;
+  }
+  info() {
+    let used = 0; for (const f of this.files.values()) used += f.length;
+    return { fw: "0.6.0", fmt: 2, n: this.files.size, free: 7900000 - used, total: 7900000, rec: this.busy ? 1 : 0, zones: HW.DEFAULT_ZONES, mtu: this.mtu };
+  }
+  onNotify(fn) { this.cb = fn; }
+  _pkt(type, body) { const u = new Uint8Array(3 + body.length); u[0] = type; u[1] = this.seq & 255; u[2] = (this.seq >> 8) & 255; this.seq = (this.seq + 1) & 0xFFFF; u.set(body, 3); return u; }
+  _pump() {
+    if (this.timer) return;
+    const g = this.gen;
+    const step = () => {
+      this.timer = null;
+      if (g !== this.gen) return;
+      for (let k = 0; k < this.batch && this.queue.length; k++) { const f = this.queue.shift(); const p = f(); if (p && this.cb) this.cb(p); }
+      if (this.queue.length) this.timer = setTimeout(step, this.delay);
+    };
+    this.timer = setTimeout(step, this.delay);
+  }
+  async write(c) {
+    const v = new DataView(c.buffer, c.byteOffset, c.byteLength);
+    const err = (code, id = 0) => { const b = new Uint8Array(3); b[0] = code; b[1] = id & 255; b[2] = id >> 8; this.queue.push(() => this._pkt(0x7F, b)); };
+    this.gen++; this.queue = []; clearTimeout(this.timer); this.timer = null;
+    if (c[0] === 0x04) return;
+    if (this.busy) { err(1); return this._pump(); }
+    if (c[0] === 0x01) {
+      const ids = [...this.files.keys()].sort((a, b) => a - b);
+      for (const id of ids) this.queue.push(() => {
+        const f = this.files.get(id), d = HW.decodeHwt(f), b = new Uint8Array(22), w = new DataView(b.buffer);
+        w.setUint16(0, id, true); w.setUint32(2, d.header.start, true); w.setUint32(6, d.header.summaryValid ? d.header.durationS : Math.floor(d.n * d.header.periodMs / 1000), true); w.setUint32(10, f.length, true);
+        w.setUint32(14, d.header.distM, true); b[18] = d.header.hrMax; b[19] = d.header.hrAvg; b[20] = d.header.fmt; b[21] = d.header.summaryValid ? 1 : 0;
+        return this._pkt(0x10, b);
+      });
+      this.queue.push(() => { const b = new Uint8Array(2); new DataView(b.buffer).setUint16(0, ids.length, true); return this._pkt(0x11, b); });
+    } else if (c[0] === 0x02) {
+      const id = v.getUint16(1, true); let off = v.getUint32(3, true);
+      const f = this.files.get(id);
+      if (!f) { err(2, id); return this._pump(); }
+      const room = this.mtu - 3 - 9;
+      for (let o = off; o < f.length; o += room) {
+        const oo = o;
+        this.queue.push(() => { const k = Math.min(room, f.length - oo), b = new Uint8Array(6 + k), w = new DataView(b.buffer);
+          w.setUint16(0, id, true); w.setUint32(2, oo, true); b.set(f.subarray(oo, oo + k), 6); return this._pkt(0x20, b); });
+      }
+      this.queue.push(() => { const b = new Uint8Array(10), w = new DataView(b.buffer);
+        w.setUint16(0, id, true); w.setUint32(2, f.length, true); w.setUint32(6, HW.crc32(f), true); return this._pkt(0x21, b); });
+    } else if (c[0] === 0x03) {
+      const id = v.getUint16(1, true), ok = this.files.delete(id);
+      this.queue.push(() => { const b = new Uint8Array(3); b[0] = id & 255; b[1] = id >> 8; b[2] = ok ? 1 : 0; return this._pkt(0x30, b); });
+    } else err(3);
+    this._pump();
+  }
+};
+
+/* ---------------------------------------------------------------- dates (heure de Paris) */
+HW.fmtDate = function (epoch) {
+  if (!epoch) return "Date inconnue";
+  return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", weekday: "short", day: "2-digit", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit" }).format(new Date(epoch * 1000));
+};
+HW.fmtDur = function (s) {
+  s = Math.round(s);
+  const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, ss = s % 60;
+  return h ? h + " h " + String(m).padStart(2, "0") : m + " min " + String(ss).padStart(2, "0");
+};
+if (typeof module !== "undefined") module.exports = HW;
+/*CORE-END*/
+</script>
+
+<script>
+"use strict";
+/* ============================================================== stockage local (IndexedDB) */
+const DB = {
+  db: null,
+  open() {
+    return new Promise((res, rej) => {
+      const r = indexedDB.open("horsewatch", 1);
+      r.onupgradeneeded = () => { const d = r.result; d.createObjectStore("sessions", { keyPath: "key" }); d.createObjectStore("kv"); };
+      r.onsuccess = () => { this.db = r.result; res(); };
+      r.onerror = () => rej(r.error);
+    });
+  },
+  _tx(store, mode, fn) {
+    return new Promise((res, rej) => {
+      const tx = this.db.transaction(store, mode), st = tx.objectStore(store);
+      let out;
+      Promise.resolve(fn(st)).then(v => out = v);
+      tx.oncomplete = () => res(out);
+      tx.onerror = () => rej(tx.error);
+    });
+  },
+  all() { return this._tx("sessions", "readonly", st => new Promise(r => { const q = st.getAll(); q.onsuccess = () => r(q.result); })); },
+  put(s) { return this._tx("sessions", "readwrite", st => st.put(s)); },
+  del(key) { return this._tx("sessions", "readwrite", st => st.delete(key)); },
+  clear() { return this._tx("sessions", "readwrite", st => st.clear()); },
+  get(k) { return this._tx("kv", "readonly", st => new Promise(r => { const q = st.get(k); q.onsuccess = () => r(q.result); })); },
+  set(k, v) { return this._tx("kv", "readwrite", st => st.put(v, k)); },
+};
+
+/* ============================================================== etat */
+const $ = id => document.getElementById(id);
+const App = { sessions: [], zones: HW.DEFAULT_ZONES.slice(), client: null, device: null, fake: null, entries: [], cancel: null, current: null };
+
+function log(msg) {
+  const l = $("log"), t = new Date().toLocaleTimeString("fr-FR");
+  l.textContent = t + "  " + msg + "\n" + l.textContent;
+}
+function sessKey(start, size, crc) { return start + "-" + size + "-" + crc.toString(16); }
+
+/* ============================================================== navigation */
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav button").forEach(x => x.classList.toggle("act", x === b));
+  ["watch", "sess", "ana", "set"].forEach(t => $("tab-" + t).classList.toggle("hide", t !== b.dataset.tab));
+  if (b.dataset.tab === "ana") renderAnalyses();
+});
+
+/* ============================================================== transports */
+function bleTransport(server) {
+  let ctrl, data, info, notifyFn = null, chain = Promise.resolve();
+  return {
+    async init() {
+      const svc = await server.getPrimaryService(HW.UUID.svc);
+      info = await svc.getCharacteristic(HW.UUID.info);
+      ctrl = await svc.getCharacteristic(HW.UUID.ctrl);
+      data = await svc.getCharacteristic(HW.UUID.data);
+      data.addEventListener("characteristicvaluechanged", e => {
+        const dv = e.target.value;
+        if (notifyFn) notifyFn(new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength).slice());
+      });
+      await data.startNotifications();
+    },
+    async info() { const dv = await info.readValue(); return JSON.parse(new TextDecoder().decode(dv)); },
+    onNotify(fn) { notifyFn = fn; },
+    write(u8) {   /* les operations GATT ne doivent pas se chevaucher : file d'attente */
+      chain = chain.then(() => ctrl.writeValueWithResponse ? ctrl.writeValueWithResponse(u8) : ctrl.writeValue(u8));
+      return chain;
+    },
+  };
+}
+
+function setConn(txt, on) { $("conn").textContent = txt; $("conn").classList.toggle("on", !!on); }
+
+async function connectBle() {
+  try {
+    /* par service OU par nom : certains iPhone ne remontent pas l'UUID 128 bits du service a la recherche */
+    const dev = await navigator.bluetooth.requestDevice({ filters: [{ services: [HW.UUID.svc] }, { namePrefix: "HorseWatch" }], optionalServices: [HW.UUID.svc] });
+    App.device = dev;
+    dev.addEventListener("gattserverdisconnected", () => { setConn("Déconnectée"); log("montre déconnectée"); App.client = null; $("sync-card").classList.add("hide"); });
+    setConn("Connexion...");
+    const server = await dev.gatt.connect();
+    const tr = bleTransport(server);
+    await tr.init();
+    await afterConnect(tr, dev.name || "HorseWatch");
+  } catch (e) { setConn("Déconnectée"); log("connexion : " + e.message); }
+}
+
+async function connectDemo() {
+  if (!App.fake) {
+    const files = new Map(), day0 = Math.floor(Date.now() / 86400000) * 86400;   /* minuit UTC du jour */
+    for (let i = 0; i < 6; i++) files.set(i + 1, HW.genDemoSession(day0 - (6 - i) * 3 * 86400 + 8.5 * 3600, 1234 + i, 0.9 + i * 0.035));
+    App.fake = new HW.FakeWatch(files);
+  }
+  const fw = App.fake;
+  await afterConnect({ info: async () => fw.info(), onNotify: f => fw.onNotify(f), write: c => fw.write(c) }, "Fausse montre (démo)");
+}
+
+async function afterConnect(tr, name) {
+  App.client = new HW.WatchClient(tr);
+  const inf = await tr.info();
+  setConn(name, true);
+  log("connectée : " + name + ", firmware " + inf.fw + ", " + inf.n + " trace(s)");
+  if (Array.isArray(inf.zones) && inf.zones.length === 4) { App.zones = inf.zones; await DB.set("zones", App.zones); renderZoneInputs(); }
+  const w = $("winfo");
+  w.classList.remove("hide");
+  w.innerHTML = stat("Firmware", "v" + inf.fw) + stat("Traces", inf.n) + stat("Espace libre", (inf.free / 1048576).toFixed(1) + " Mo") +
+    stat("Enregistrement", inf.rec ? "en cours" : "non") + stat("MTU", inf.mtu);
+  if (inf.fmt > Math.max(...HW.FORMATS)) log("attention : format de trace " + inf.fmt + " plus récent que l'appli");
+  $("sync-card").classList.remove("hide");
+  if (inf.rec) log("la montre enregistre : export impossible pendant un enregistrement");
+  await refreshWatchList();
+}
+
+function stat(label, val) { return '<div class="stat"><small>' + label + "</small><span>" + val + "</span></div>"; }
+
+async function refreshWatchList() {
+  try {
+    App.entries = await App.client.list();
+    const have = new Set(App.sessions.map(s => s.start + "-" + s.size));
+    $("watch-list").innerHTML = App.entries.map(e => '<div class="sess"><div class="d"><b>' + HW.fmtDate(e.start) + "</b>" +
+      '<span class="muted">' + HW.fmtDur(e.durationS) + (e.summaryValid ? " · " + (e.distM / 1000).toFixed(2) + " km · FC max " + e.hrMax : "") +
+      " · " + (e.size / 1024).toFixed(0) + " ko</span></div>" + (have.has(e.start + "-" + e.size) ? '<span class="pill on">reçue</span>' : '<span class="pill">nouvelle</span>') + "</div>").join("");
+    $("sync-st").textContent = App.entries.length + " séance(s) sur la montre";
+  } catch (e) { log("liste : " + e.message); }
+}
+
+async function syncNew() {
+  const have = new Set(App.sessions.map(s => s.start + "-" + s.size));
+  const todo = App.entries.filter(e => !have.has(e.start + "-" + e.size));
+  if (!todo.length) { $("sync-st").textContent = "Tout est déjà téléchargé"; return; }
+  const total = todo.reduce((a, e) => a + e.size, 0);
+  let doneB = 0;
+  App.cancel = { cancelled: false };
+  $("b-cancel").classList.remove("hide");
+  $("b-sync").disabled = true;
+  const t0 = performance.now();
+  try {
+    for (const e of todo) {
+      $("sync-st").textContent = "Téléchargement : " + HW.fmtDate(e.start);
+      const u8 = await App.client.read(e, (g, n) => {
+        $("p-file").style.width = (100 * g / n) + "%";
+        $("p-all").style.width = (100 * (doneB + g) / total) + "%";
+      }, App.cancel);
+      doneB += e.size;
+      const crc = HW.crc32(u8);
+      const d = HW.decodeHwt(u8);
+      const sum = d.header.summaryValid ? { durationS: d.header.durationS, distM: d.header.distM, hrMax: d.header.hrMax, hrAvg: d.header.hrAvg } : HW.summarize(d);
+      const rec = { key: sessKey(e.start, e.size, crc), start: e.start, size: e.size, crc, watchId: e.id, raw: u8, sum, fmt: d.header.fmt, fw: d.header.fw, importedAt: Date.now() };
+      await DB.put(rec);
+      App.sessions.push(rec);
+      const kbps = doneB / 1024 / ((performance.now() - t0) / 1000);
+      log("reçue : " + HW.fmtDate(e.start) + " (" + (e.size / 1024).toFixed(0) + " ko, CRC OK, " + kbps.toFixed(1) + " ko/s)");
+      if ($("c-del").checked) {
+        const ok = await App.client.remove(e.id);
+        log(ok ? "supprimée de la montre" : "suppression refusée par la montre");
+      }
+    }
+    $("sync-st").textContent = "Synchronisation terminée";
+  } catch (err) {
+    $("sync-st").textContent = "Arrêt : " + err.message;
+    log("synchro : " + err.message);
+  }
+  $("b-cancel").classList.add("hide");
+  $("b-sync").disabled = false;
+  renderSessions();
+  await refreshWatchList();
+}
+
+/* ============================================================== liste des seances */
+function renderSessions() {
+  App.sessions.sort((a, b) => b.start - a.start);
+  $("sess-empty").classList.toggle("hide", App.sessions.length > 0);
+  $("sess-list").innerHTML = App.sessions.map((s, i) => '<div class="sess" data-i="' + i + '"><div class="d"><b>' + HW.fmtDate(s.start) +
+    '</b><span class="muted">' + HW.fmtDur(s.sum.durationS) + " · " + (s.sum.distM / 1000).toFixed(2) + " km · moy " + s.sum.hrAvg +
+    ' bpm</span></div><div class="hr">' + (s.sum.hrMax || "--") + '<small class="muted"> max</small></div></div>').join("");
+  document.querySelectorAll("#sess-list .sess").forEach(el => el.onclick = () => openDetail(App.sessions[+el.dataset.i]));
+}
+
+/* ============================================================== graphiques (canvas, sans bibliotheque) */
+function cssVar(n) { return getComputedStyle(document.body).getPropertyValue(n).trim(); }
+function drawChart(cv, t, y, opt) {
+  const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.height / (cv._dpr || 1);
+  if (!cv._dpr) { cv._h = cv.height; }
+  cv.width = W * dpr; cv.height = cv._h * dpr; cv._dpr = dpr;
+  const c = cv.getContext("2d");
+  c.scale(dpr, dpr);
+  const h = cv._h, padL = 40, padB = 22, pw = W - padL - 8, ph = h - padB - 8;
+  let lo = Infinity, hi = -Infinity;
+  for (const v of y) if (!isNaN(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+  if (!isFinite(lo)) { lo = 0; hi = 1; }
+  if (opt.pad) { const m = Math.max(5, (hi - lo) * 0.15); lo -= m; hi += m; }
+  let ymin = opt.ymin !== undefined ? opt.ymin : lo, ymax = opt.ymax !== undefined ? opt.ymax : hi;
+  if (ymax - ymin < 10) ymax = ymin + 10;
+  const tmax = t.length ? t[t.length - 1] : 1;
+  const X = s => padL + pw * s / (tmax || 1), Y = v => 8 + ph * (1 - (v - ymin) / (ymax - ymin));
+  c.clearRect(0, 0, W, h);
+  if (opt.bands) {   /* bandes de zones cardio */
+    let lo = ymin;
+    opt.bands.forEach((up, i) => {
+      const a = Math.max(lo, ymin), b = Math.min(i < 4 ? up : ymax, ymax);
+      if (b > a) { c.fillStyle = HW.ZONE_COLORS[i] + "22"; c.fillRect(padL, Y(b), pw, Y(a) - Y(b)); }
+      lo = up;
+    });
+  }
+  c.strokeStyle = cssVar("--line"); c.fillStyle = cssVar("--dim"); c.font = "12px sans-serif"; c.lineWidth = 1;
+  for (let k = 0; k <= 4; k++) {
+    const v = ymin + (ymax - ymin) * k / 4;
+    c.beginPath(); c.moveTo(padL, Y(v)); c.lineTo(W - 8, Y(v)); c.stroke();
+    c.fillText(Math.round(v), 4, Y(v) + 4);
+  }
+  if (opt.xlabels) opt.xlabels.forEach((txt, i) => { c.fillText(txt, Math.min(W - 40, Math.max(padL, X(t[i]) - 14)), h - 6); });
+  else for (let k = 0; k <= 5; k++) { const s = tmax * k / 5; c.fillText(Math.round(s / 60) + "'", X(s) - 8, h - 6); }
+  if (opt.dots) { c.fillStyle = opt.color; for (let i = 0; i < t.length; i++) if (!isNaN(y[i])) { c.beginPath(); c.arc(X(t[i]), Y(y[i]), 4, 0, 6.3); c.fill(); } }
+  c.strokeStyle = opt.color; c.lineWidth = 2; c.beginPath();
+  let pen = false;
+  for (let i = 0; i < t.length; i++) {
+    if (isNaN(y[i])) { pen = false; continue; }
+    if (!pen) { c.moveTo(X(t[i]), Y(y[i])); pen = true; } else c.lineTo(X(t[i]), Y(y[i]));
+  }
+  c.stroke();
+}
+
+/* ============================================================== carte */
+let leafletState = "idle", leafletMap = null, leafletLayer = null;
+function loadLeaflet() {
+  if (leafletState !== "idle") return Promise.resolve(leafletState === "ok");
+  leafletState = "loading";
+  return new Promise(res => {
+    const css = document.createElement("link");
+    css.rel = "stylesheet"; css.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+    document.head.appendChild(css);
+    const s = document.createElement("script");
+    s.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+    s.onload = () => { leafletState = "ok"; res(true); };
+    s.onerror = () => { leafletState = "fail"; res(false); };
+    document.head.appendChild(s);
+    setTimeout(() => { if (leafletState === "loading") { leafletState = "fail"; res(false); } }, 8000);
+  });
+}
+function colorFor(mode, d, i, vq) {
+  if (mode === "hr") { const z = HW.zoneOf(d.hr[i], App.zones); return z < 0 ? "#888" : HW.ZONE_COLORS[z]; }
+  const v = d.v[i], k = v < vq[0] ? 0 : v < vq[1] ? 1 : v < vq[2] ? 2 : 3;
+  return ["#3d8bff", "#2ecc71", "#f5d10c", "#ff2d2d"][k];
+}
+function segments(d, mode) {
+  const vs = Array.from(d.v).filter(x => !isNaN(x)).sort((a, b) => a - b);
+  const q = p => vs.length ? vs[Math.floor(p * (vs.length - 1))] : 0;
+  const vq = [q(0.25), q(0.5), q(0.75)];
+  const segs = [];
+  let cur = null;
+  for (let i = 0; i < d.n; i++) {
+    if (isNaN(d.lat[i])) { cur = null; continue; }
+    const col = colorFor(mode, d, i, vq);
+    if (!cur || cur.col !== col) { const prev = cur; cur = { col, pts: prev ? [prev.pts[prev.pts.length - 1]] : [] }; segs.push(cur); }
+    cur.pts.push([d.lat[i], d.lon[i]]);
+  }
+  return { segs, vq };
+}
+async function drawMap(d, mode) {
+  const box = $("map");
+  const { segs, vq } = segments(d, mode);
+  $("map-note").textContent = mode === "v" ? "Vitesse : bleu < " + Math.round(vq[0]) + " < vert < " + Math.round(vq[1]) + " < jaune < " + Math.round(vq[2]) + " < rouge (m/min)" : "Couleurs des zones cardio de la montre.";
+  if (!segs.length) { box.innerHTML = '<p class="muted" style="padding:14px">Pas de position GPS dans cette séance.</p>'; return; }
+  const ok = navigator.onLine !== false && await loadLeaflet();
+  if (ok) {
+    if (!leafletMap) {
+      box.innerHTML = "";
+      leafletMap = L.map(box, { zoomControl: true, attributionControl: true });
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(leafletMap);
+    }
+    if (leafletLayer) leafletLayer.remove();
+    leafletLayer = L.layerGroup(segs.map(s => L.polyline(s.pts, { color: s.col, weight: 5, opacity: 0.95 }))).addTo(leafletMap);
+    leafletMap.fitBounds(L.featureGroup(leafletLayer.getLayers()).getBounds(), { padding: [16, 16] });
+    setTimeout(() => leafletMap.invalidateSize(), 100);
+  } else {   /* hors ligne : trace seul sur fond neutre */
+    leafletMap = null;
+    box.innerHTML = '<canvas id="mapcv" height="320"></canvas>';
+    const cv = $("mapcv"), dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = 320;
+    cv.width = W * dpr; cv.height = H * dpr;
+    const c = cv.getContext("2d"); c.scale(dpr, dpr);
+    let la0 = Infinity, la1 = -Infinity, lo0 = Infinity, lo1 = -Infinity;
+    segs.forEach(s => s.pts.forEach(([a, b]) => { la0 = Math.min(la0, a); la1 = Math.max(la1, a); lo0 = Math.min(lo0, b); lo1 = Math.max(lo1, b); }));
+    const kx = Math.cos((la0 + la1) / 2 * Math.PI / 180), sx = (lo1 - lo0) * kx || 1e-6, sy = (la1 - la0) || 1e-6, sc = Math.min((W - 20) / sx, (H - 20) / sy);
+    c.lineWidth = 4; c.lineCap = "round";
+    segs.forEach(s => { c.strokeStyle = s.col; c.beginPath(); s.pts.forEach(([a, b], k) => { const x = 10 + (b - lo0) * kx * sc, y = H - 10 - (a - la0) * sc; k ? c.lineTo(x, y) : c.moveTo(x, y); }); c.stroke(); });
+    $("map-note").textContent += " (hors ligne : fond de carte indisponible)";
+  }
+}
+
+/* ============================================================== detail d'une seance */
+let mapMode = "hr";
+function openDetail(s) {
+  App.current = s;
+  const a = HW.analyze(s.raw, App.zones);
+  App.currentA = a;
+  $("detail").classList.remove("hide");
+  $("d-title").textContent = HW.fmtDate(s.start);
+  $("d-stats").innerHTML = stat("Durée", HW.fmtDur(a.sum.durationS)) + stat("Distance", (a.sum.distM / 1000).toFixed(2) + " km") +
+    stat("FC moy / max", a.sum.hrAvg + " / " + a.sum.hrMax) + stat("Vitesse max", Math.round(a.vmax) + " m/min") +
+    stat("Format", "v" + a.d.header.fmt + " (fw " + a.d.header.fw + ")");
+  requestAnimationFrame(() => {
+    drawChart($("c-hr"), a.d.t, HW.smooth(a.d.hr, 1), { color: "#ff3b30", bands: App.zones, ymin: 40, ymax: Math.max(220, a.sum.hrMax + 10) });
+    drawChart($("c-v"), a.d.t, HW.smooth(a.d.v, 2), { color: "#3d8bff", ymin: 0 });
+    drawMap(a.d, mapMode);
+  });
+  const tot = a.zones.reduce((x, y) => x + y, 0) || 1;
+  $("d-zbar").innerHTML = a.zones.map((z, i) => '<div style="width:' + (100 * z / tot) + "%;background:" + HW.ZONE_COLORS[i] + '"></div>').join("");
+  const lim = ["≤ " + App.zones[0], App.zones[0] + "-" + App.zones[1], App.zones[1] + "-" + App.zones[2], App.zones[2] + "-" + App.zones[3], "> " + App.zones[3]];
+  $("d-zleg").innerHTML = a.zones.map((z, i) => '<span><i class="dot" style="background:' + HW.ZONE_COLORS[i] + '"></i> ' + HW.ZONE_NAMES[i] +
+    '</span><span class="muted">' + lim[i] + " bpm</span><b>" + HW.fmtDur(z) + "</b>").join("");
+  const v = a.vhr, r = a.rec;
+  $("d-ana").innerHTML = '<div class="grid">' +
+    (v.ok ? stat("V140", Math.round(v.v140) + " m/min") + stat("V200", Math.round(v.v200) + " m/min") + stat("R² / phases", v.r2.toFixed(2) + " / " + v.n)
+      : stat("V140 / V200", "-") + '<div class="muted">' + v.why + "</div>") +
+    (r.ok ? stat("FC fin d'effort", Math.round(r.hr0)) + stat("FC +1 min", isNaN(r.hr60) ? "-" : Math.round(r.hr60)) +
+            stat("FC +2 min", isNaN(r.hr120) ? "-" : Math.round(r.hr120)) + stat("FC +5 min", isNaN(r.hr300) ? "-" : Math.round(r.hr300)) +
+            stat("Constante de temps", isNaN(r.tau) ? "-" : Math.round(r.tau) + " s")
+      : '<div class="muted">Récupération : ' + r.why + "</div>") + "</div>";
+}
+$("d-back").onclick = () => { $("detail").classList.add("hide"); };
+document.querySelectorAll("#map-seg button").forEach(b => b.onclick = () => {
+  mapMode = b.dataset.k;
+  document.querySelectorAll("#map-seg button").forEach(x => x.classList.toggle("act", x === b));
+  if (App.currentA) drawMap(App.currentA.d, mapMode);
+});
+
+/* ============================================================== fichiers (telechargement / partage iOS) */
+async function saveFile(name, data, mime) {
+  const blob = new Blob([data], { type: mime });
+  try {
+    const f = new File([blob], name, { type: mime });
+    if (navigator.canShare && navigator.canShare({ files: [f] })) { await navigator.share({ files: [f], title: name }); return; }
+  } catch (e) { if (e.name === "AbortError") return; }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+function baseName(s) { return "horsewatch_" + (s.start ? new Date(s.start * 1000).toISOString().slice(0, 16).replace(/[:T]/g, "-") : s.key); }
+$("d-csv").onclick = () => saveFile(baseName(App.current) + ".csv", HW.toCSV(App.currentA.d), "text/csv");
+$("d-gpx").onclick = () => saveFile(baseName(App.current) + ".gpx", HW.toGPX(App.currentA.d, "HorseWatch " + HW.fmtDate(App.current.start)), "application/gpx+xml");
+$("d-raw").onclick = () => saveFile(baseName(App.current) + ".hwt", App.current.raw, "application/octet-stream");
+$("d-del").onclick = async () => {
+  if (!confirm("Supprimer cette séance du téléphone ? (la montre n'est pas concernée)")) return;
+  await DB.del(App.current.key);
+  App.sessions = App.sessions.filter(s => s.key !== App.current.key);
+  $("detail").classList.add("hide");
+  renderSessions();
+};
+
+/* ============================================================== analyses (evolution) */
+let anaMode = "v";
+function renderAnalyses() {
+  const rows = App.sessions.slice().sort((a, b) => a.start - b.start).map(s => ({ s, a: HW.analyze(s.raw, App.zones) }));
+  const cv = $("ana-chart");
+  const t = rows.map((_, i) => i);
+  const xl = rows.map(r => r.s.start ? new Date(r.s.start * 1000).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", timeZone: "Europe/Paris" }) : "?");
+  if (rows.length > 7) xl.forEach((_, i) => { if (i % Math.ceil(rows.length / 6)) xl[i] = ""; });
+  if (anaMode === "v") {
+    drawChart(cv, t, rows.map(r => r.a.vhr.ok ? r.a.vhr.v140 : NaN), { color: "#ff7a1a", pad: true, dots: true, xlabels: xl });
+    $("ana-table").innerHTML = "<table><tr><th>Séance</th><th>V140</th><th>V200</th><th>R²</th></tr>" + rows.map(r => "<tr><td>" + HW.fmtDate(r.s.start) +
+      "</td><td>" + (r.a.vhr.ok ? Math.round(r.a.vhr.v140) : "-") + "</td><td>" + (r.a.vhr.ok ? Math.round(r.a.vhr.v200) : "-") +
+      "</td><td>" + (r.a.vhr.ok ? r.a.vhr.r2.toFixed(2) : "-") + "</td></tr>").join("") + "</table>" +
+      '<p class="muted">Courbe : V140 de séance en séance (une V140 qui monte = cheval plus économe à 140 bpm).</p>';
+  } else {
+    drawChart(cv, t, rows.map(r => r.a.rec.ok ? r.a.rec.tau : NaN), { color: "#2ecc71", pad: true, dots: true, xlabels: xl });
+    $("ana-table").innerHTML = "<table><tr><th>Séance</th><th>FC fin</th><th>+1'</th><th>+2'</th><th>+5'</th><th>τ (s)</th></tr>" + rows.map(r => {
+      const x = r.a.rec, f = v => (x.ok && !isNaN(v)) ? Math.round(v) : "-";
+      return "<tr><td>" + HW.fmtDate(r.s.start) + "</td><td>" + f(x.hr0) + "</td><td>" + f(x.hr60) + "</td><td>" + f(x.hr120) + "</td><td>" + f(x.hr300) + "</td><td>" + f(x.tau) + "</td></tr>";
+    }).join("") + "</table>" + '<p class="muted">Courbe : constante de temps de récupération (plus elle est courte, meilleure est la récupération).</p>';
+  }
+}
+document.querySelectorAll("#ana-seg button").forEach(b => b.onclick = () => {
+  anaMode = b.dataset.k;
+  document.querySelectorAll("#ana-seg button").forEach(x => x.classList.toggle("act", x === b));
+  renderAnalyses();
+});
+
+/* ============================================================== reglages, sauvegarde */
+function renderZoneInputs() {
+  $("zin").innerHTML = App.zones.map((z, i) => '<div><i class="dot" style="background:' + HW.ZONE_COLORS[i] + '"></i><br><input type="number" id="z' + i + '" value="' + z + '" min="40" max="240" step="5"></div>').join("");
+}
+$("b-zsave").onclick = async () => {
+  const z = [0, 1, 2, 3].map(i => +$("z" + i).value);
+  for (let i = 1; i < 4; i++) if (!(z[i] > z[i - 1])) { alert("Les seuils doivent être croissants."); return; }
+  App.zones = z; await DB.set("zones", z); log("zones enregistrées : " + z.join(" / "));
+};
+$("c-sun").onchange = async e => { document.body.classList.toggle("sun", e.target.checked); await DB.set("sun", e.target.checked); };
+$("b-backup").onclick = async () => {
+  const data = { app: "HorseWatch", appVersion: HW.VERSION, exported: new Date().toISOString(), zones: App.zones,
+    sessions: App.sessions.map(s => ({ key: s.key, start: s.start, size: s.size, crc: s.crc, watchId: s.watchId, fmt: s.fmt, fw: s.fw, importedAt: s.importedAt, raw: HW.b64.enc(s.raw) })) };
+  await saveFile("horsewatch_sauvegarde_" + new Date().toISOString().slice(0, 10) + ".json", JSON.stringify(data), "application/json");
+};
+$("b-restore").onclick = () => $("f-restore").click();
+$("f-restore").onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    const data = JSON.parse(await f.text());
+    if (data.app !== "HorseWatch") throw new Error("fichier non reconnu");
+    let n = 0, bad = 0;
+    for (const s of data.sessions) {
+      const raw = HW.b64.dec(s.raw);
+      if (HW.crc32(raw) !== s.crc) { bad++; continue; }
+      const d = HW.decodeHwt(raw);
+      const sum = d.header.summaryValid ? { durationS: d.header.durationS, distM: d.header.distM, hrMax: d.header.hrMax, hrAvg: d.header.hrAvg } : HW.summarize(d);
+      const rec = { key: s.key, start: s.start, size: s.size, crc: s.crc, watchId: s.watchId, raw, sum, fmt: d.header.fmt, fw: d.header.fw, importedAt: s.importedAt };
+      await DB.put(rec);
+      if (!App.sessions.find(x => x.key === rec.key)) { App.sessions.push(rec); n++; }
+    }
+    if (Array.isArray(data.zones)) { App.zones = data.zones; await DB.set("zones", App.zones); renderZoneInputs(); }
+    log("restauration : " + n + " séance(s) ajoutée(s)" + (bad ? ", " + bad + " corrompue(s) ignorée(s)" : ""));
+    renderSessions();
+  } catch (err) { alert("Restauration impossible : " + err.message); }
+  e.target.value = "";
+};
+$("b-wipe").onclick = async () => {
+  if (!confirm("Effacer toutes les séances de ce téléphone ? Pensez à exporter une sauvegarde avant.")) return;
+  await DB.clear(); App.sessions = []; renderSessions(); log("séances locales effacées");
+};
+
+/* ============================================================== demarrage */
+$("b-connect").onclick = connectBle;
+$("b-demo").onclick = connectDemo;
+$("b-sync").onclick = syncNew;
+$("b-cancel").onclick = () => { if (App.cancel) App.cancel.cancelled = true; };
+(async function init() {
+  $("ver").textContent = $("ver2").textContent = "v" + HW.VERSION;
+  $("about").innerHTML = "HorseWatch app v" + HW.VERSION + " · formats de trace " + HW.FORMATS.join(", ") + " · service " + HW.UUID.svc;
+  if (!navigator.bluetooth) { $("nobt").classList.remove("hide"); $("b-connect").disabled = true; }
+  try {
+    await DB.open();
+    App.sessions = (await DB.all()).map(s => ({ ...s, raw: s.raw instanceof Uint8Array ? s.raw : new Uint8Array(s.raw) }));
+    const z = await DB.get("zones"); if (Array.isArray(z)) App.zones = z;
+    const sun = await DB.get("sun"); if (sun) { $("c-sun").checked = true; document.body.classList.add("sun"); }
+  } catch (e) { log("stockage local indisponible : " + e.message); }
+  renderZoneInputs();
+  renderSessions();
+  /* fonctionnement hors ligne : service worker optionnel (sw.js a cote de ce fichier, sur GitHub Pages) */
+  if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
+})();
+</script>
+</body>
+</html>

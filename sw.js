@@ -1,12 +1,12 @@
 /*
  * HorseWatch - app/sw.js
- * Version : 1.0.0 (2026-11-21)
+ * Version : 1.0.1 (2026-11-21)
  * Service worker optionnel : met en cache l'appli et Leaflet pour un fonctionnement hors ligne
  * (les tuiles de carte deja vues restent aussi disponibles). A deposer a cote de HorseWatch-app-x.y.z.html.
  * Changer CACHE a chaque nouvelle version de l'appli.
  */
-const CACHE = "horsewatch-1.0.0";
-const CORE = ["./", "./HorseWatch-app-1.0.0.html", "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css", "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"];
+const CACHE = "horsewatch-1.0.1";
+const CORE = ["./", "./HorseWatch-app-1.0.1.html", "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css", "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"];
 const MAX_TILES = 1500;
 
 self.addEventListener("install", e => {
@@ -33,5 +33,5 @@ self.addEventListener("fetch", e => {
   e.respondWith(fetch(e.request).then(r => {
     if (r.ok && (url.origin === location.origin || url.hostname === "unpkg.com")) { const cl = r.clone(); caches.open(CACHE).then(c => c.put(e.request, cl)); }
     return r;
-  }).catch(() => caches.match(e.request, { ignoreSearch: true }).then(r => r || caches.match("./HorseWatch-app-1.0.0.html"))));
+  }).catch(() => caches.match(e.request, { ignoreSearch: true }).then(r => r || caches.match("./HorseWatch-app-1.0.1.html"))));
 });
